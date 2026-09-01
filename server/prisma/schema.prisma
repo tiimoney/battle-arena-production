@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled (pgbouncer) connection for normal query traffic.
+  url       = env("DATABASE_URL")
+  // Direct connection for schema migrations -- Neon's pooled endpoint runs in
+  // transaction mode, which doesn't support the advisory locks `prisma migrate`
+  // needs.
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  admin
+  competitor
+}
+
+enum EntryType {
+  individual
+  team
+}
+
+// passwordHash is null for a migrated placeholder profile that has not yet been
+// claimed via sign-up (see server/src/auth for the claim flow).
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String?
+  displayName  String
+  // trim + collapse-whitespace + lowercase of `displayName`, kept in sync by the app
+  // layer -- same pattern as Team.nameNormalized. Display names double as a login
+  // identifier (alongside email), so they must be unique too.
+  displayNameNormalized String @unique
+  role         Role     @default(competitor)
+  // New signups must verify their email before they can log in; a claimed migrated
+  // account is trusted immediately (that email already belonged to a real account in
+  // the old system) and is created with emailVerified: true, skipping this.
+  emailVerified               Boolean   @default(false)
+  verificationToken           String?   @unique
+  verificationTokenExpiresAt  DateTime?
+  teamId       String?  @unique
+  // SetNull (not the Prisma default of Restrict): deleting a team should never be
+  // blocked by a still-assigned competitor -- it just leaves them unassigned again,
+  // matching the old app's Firestore behavior where a stale profiles.teamId simply
+  // stopped resolving to anything.
+  team         Team?    @relation("UserAssignedTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  scoreReports ScoreReport[]
+  rosterSlot   TeamMember?
+}
+
+model Team {
+  id             String   @id @default(cuid())
+  name           String
+  // trim + collapse-whitespace + lowercase of `name`, kept in sync by the app layer.
+  // Enforces case-insensitive uniqueness as a real DB constraint.
+  nameNormalized String   @unique
+  teamSize       Int
+  entryType      EntryType @default(team)
+  createdAt      DateTime @default(now())
+
+  members      TeamMember[]
+  assignedUser User?         @relation("UserAssignedTeam")
+  fixturesAsA  Fixture[]     @relation("FixtureTeamA")
+  fixturesAsB  Fixture[]     @relation("FixtureTeamB")
+  matchesAsA   MatchResult[] @relation("MatchTeamA")
+  matchesAsB   MatchResult[] @relation("MatchTeamB")
+}
+
+model TeamMember {
+  id     String @id @default(cuid())
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  name   String
+  // preserves roster order (the old app used a plain ordered list)
+  position Int
+
+  linkedUserId String? @unique
+  linkedUser   User?   @relation(fields: [linkedUserId], references: [id])
+}
+
+model Fixture {
+  id      String @id @default(cuid())
+  round   Int
+  leg     Int    @default(1)
+  teamAId String
+  teamBId String
+  teamA   Team   @relation("FixtureTeamA", fields: [teamAId], references: [id], onDelete: Cascade)
+  teamB   Team   @relation("FixtureTeamB", fields: [teamBId], references: [id], onDelete: Cascade)
+  date    DateTime
+
+  match        MatchResult?
+  scoreReports ScoreReport[]
+}
+
+model MatchResult {
+  id      String @id @default(cuid())
+  teamAId String
+  teamBId String
+  teamA   Team   @relation("MatchTeamA", fields: [teamAId], references: [id], onDelete: Cascade)
+  teamB   Team   @relation("MatchTeamB", fields: [teamBId], references: [id], onDelete: Cascade)
+  scoreA  Int
+  scoreB  Int
+  date    DateTime
+
+  // SetNull (not cascade): deleting a fixture can optionally keep its match as an
+  // unlinked record in match history — the route deletes the match row explicitly
+  // first only when the admin opts into "delete fixture and result".
+  fixtureId String?  @unique
+  fixture   Fixture? @relation(fields: [fixtureId], references: [id], onDelete: SetNull)
+}
+
+model ScoreReport {
+  id             String   @id @default(cuid())
+  fixtureId      String
+  fixture        Fixture  @relation(fields: [fixtureId], references: [id], onDelete: Cascade)
+  teamAId        String
+  teamBId        String
+  reporterUserId String
+  reporter       User     @relation(fields: [reporterUserId], references: [id], onDelete: Cascade)
+  reporterTeamId String
+  teamAScore     Int
+  teamBScore     Int
+  reportedAt     DateTime @default(now())
+
+  // one active report per (fixture, reporting user) -- upsert target
+  @@unique([fixtureId, reporterUserId])
+}
+
+// Immutable point-in-time snapshot of a season. Stored as JSON (not normalized rows)
+// because archived data never changes and doesn't need live FK integrity with
+// current teams -- mirrors the old app's ArchivedSeason.toJson() embedded-list shape.
+model ArchivedSeason {
+  id           String   @id @default(cuid())
+  name         String
+  archivedAt   DateTime @default(now())
+  teamsJson    Json
+  fixturesJson Json
+  matchesJson  Json
+}

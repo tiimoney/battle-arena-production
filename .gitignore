@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+migration/dumps/
+migration/service-account.json
+**/service-account.json
+.neon
+.idea/

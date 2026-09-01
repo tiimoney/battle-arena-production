@@ -1,0 +1,19 @@
+{
+  "name": "mocheso-league",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client",
+    "migration"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "build": "npm run build --workspace server && npm run build --workspace client",
+    "test": "npm run test --workspace server"
+  },
+  "dependencies": {
+    "@neon/config": "^1.1.0",
+    "@neon/env": "^1.1.6"
+  }
+}

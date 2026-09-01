@@ -1,0 +1,21 @@
+{
+  "name": "migration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dump": "tsx src/dumpFirestore.ts",
+    "migrate": "tsx src/migrate.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^12.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

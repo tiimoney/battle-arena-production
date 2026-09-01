@@ -1,0 +1,50 @@
+.league-table-scroll {
+  overflow-x: auto;
+}
+
+.league-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 720px;
+  font-size: 0.9rem;
+}
+
+.league-table th {
+  text-align: center;
+  color: var(--color-on-surface-variant);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--divider-color);
+}
+
+.league-table td {
+  text-align: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--divider-color);
+  transition: background-color 0.4s ease;
+}
+
+.league-table .align-left {
+  text-align: left;
+}
+
+.league-table-row {
+  transition: box-shadow 0.3s ease;
+}
+
+.league-table-row:hover td {
+  background: var(--color-surface-high);
+}
+
+.rank-cell {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.points-cell {
+  font-weight: 700;
+  color: var(--color-primary);
+}
