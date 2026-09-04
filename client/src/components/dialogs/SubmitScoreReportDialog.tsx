@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "../Modal";
 import { scoreReportsApi } from "../../api/scoreReports";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 import type { Fixture, ScoreReport, Team } from "../../api/types";
 
 export function SubmitScoreReportDialog({
@@ -42,7 +42,7 @@ export function SubmitScoreReportDialog({
 
     setIsSaving(true);
     try {
-      await scoreReportsApi.submit({ fixtureId: fixture.id, scoreA: parsedA, scoreB: parsedB });
+      await scoreReportsApi.submit({ groupId: fixture.groupId, fixtureId: fixture.id, scoreA: parsedA, scoreB: parsedB });
       onSubmitted();
       onClose();
     } catch (err) {

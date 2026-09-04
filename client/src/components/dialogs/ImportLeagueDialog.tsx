@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Modal } from "../Modal";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { leagueApi } from "../../api/league";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 
 export function ImportLeagueDialog({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
   const [text, setText] = useState("");

@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Modal } from "../Modal";
 import { fixturesApi } from "../../api/fixtures";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 import { useLeagueData } from "../../state/LeagueDataContext";
 import type { Fixture } from "../../api/types";
 
 export function EditFixtureDialog({ fixture, onClose, onSaved }: { fixture: Fixture; onClose: () => void; onSaved: () => void }) {
-  const { teams } = useLeagueData();
+  const { teams: allTeams } = useLeagueData();
+  const teams = allTeams.filter((t) => t.groupIds.includes(fixture.groupId));
   const [round, setRound] = useState(String(fixture.round));
   const [teamAId, setTeamAId] = useState(fixture.teamAId);
   const [teamBId, setTeamBId] = useState(fixture.teamBId);
@@ -25,7 +26,7 @@ export function EditFixtureDialog({ fixture, onClose, onSaved }: { fixture: Fixt
 
     setIsSaving(true);
     try {
-      await fixturesApi.update(fixture.id, {
+      await fixturesApi.update(fixture.groupId, fixture.id, {
         round: parsedRound,
         teamAId,
         teamBId,

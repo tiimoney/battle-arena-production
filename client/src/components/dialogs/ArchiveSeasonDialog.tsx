@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "../Modal";
 import { archivesApi } from "../../api/archives";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 
 function defaultArchiveName(): string {
   const today = new Date();
@@ -9,7 +9,17 @@ function defaultArchiveName(): string {
   return `Season ${formatted}`;
 }
 
-export function ArchiveSeasonDialog({ onClose, onArchived }: { onClose: () => void; onArchived: () => void }) {
+export function ArchiveSeasonDialog({
+  groupId,
+  groupName,
+  onClose,
+  onArchived,
+}: {
+  groupId: string;
+  groupName: string;
+  onClose: () => void;
+  onArchived: () => void;
+}) {
   const [name, setName] = useState(defaultArchiveName());
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -22,7 +32,7 @@ export function ArchiveSeasonDialog({ onClose, onArchived }: { onClose: () => vo
     }
     setIsSaving(true);
     try {
-      await archivesApi.create({ name, clearCurrentSeason: true });
+      await archivesApi.create({ groupId, name });
       onArchived();
       onClose();
     } catch (err) {
@@ -33,7 +43,11 @@ export function ArchiveSeasonDialog({ onClose, onArchived }: { onClose: () => vo
   }
 
   return (
-    <Modal title="Archive Season" onClose={onClose}>
+    <Modal title="Archive Episode" onClose={onClose}>
+      <p style={{ marginTop: 0, color: "var(--color-on-surface-variant)" }}>
+        This ends "{groupName}": its current teams, fixtures, and results are saved as an archived season, and the
+        group is removed. Teams stay registered and keep playing in any other groups they're in.
+      </p>
       <div className="field">
         <label htmlFor="archive-name">Archive name</label>
         <input id="archive-name" placeholder="e.g. Summer League 2026" value={name} onChange={(e) => setName(e.target.value)} />

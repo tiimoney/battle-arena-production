@@ -9,8 +9,8 @@
   top: calc(100% + 6px);
   background: var(--color-surface-lowest);
   border: 1px solid var(--card-border);
-  border-radius: 14px;
-  box-shadow: var(--card-shadow);
+  border-radius: var(--card-radius);
+  box-shadow: var(--overlay-shadow);
   min-width: 200px;
   padding: 6px;
   z-index: 500;
@@ -23,7 +23,7 @@
   background: none;
   border: none;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--button-radius-sm);
   cursor: pointer;
   font-size: 0.88rem;
   color: var(--color-on-surface);

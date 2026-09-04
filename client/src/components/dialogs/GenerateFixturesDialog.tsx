@@ -1,17 +1,19 @@
 import { useState } from "react";
 import { Modal } from "../Modal";
 import { fixturesApi } from "../../api/fixtures";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
 export function GenerateFixturesDialog({
+  groupId,
   hasExistingFixtures,
   onClose,
   onGenerated,
 }: {
+  groupId: string;
   hasExistingFixtures: boolean;
   onClose: () => void;
   onGenerated: (count: number) => void;
@@ -36,7 +38,7 @@ export function GenerateFixturesDialog({
 
     setIsSaving(true);
     try {
-      const result = await fixturesApi.generate({
+      const result = await fixturesApi.generate(groupId, {
         startDate: new Date(startDate).toISOString(),
         daysBetweenRounds: days,
         isDoubleRoundRobin,

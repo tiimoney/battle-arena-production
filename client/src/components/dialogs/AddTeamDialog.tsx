@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../Modal";
 import { teamsApi } from "../../api/teams";
 import { usersApi } from "../../api/users";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 import { useLeagueData } from "../../state/LeagueDataContext";
 import type { EntryType, Profile, Team } from "../../api/types";
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AdminShellScaffold } from "../components/AdminShellScaffold";
 import { PopupMenu } from "../components/PopupMenu";
 import { EmptyStateCard } from "../components/EmptyStateCard";
@@ -11,7 +11,7 @@ import { useLeagueData } from "../state/LeagueDataContext";
 import { useSnackbar } from "../state/SnackbarContext";
 import { fixturesApi } from "../api/fixtures";
 import { matchesApi } from "../api/matches";
-import { ApiError } from "../api/client";
+import { ApiError } from "../errors";
 import type { Fixture } from "../api/types";
 
 type StatusFilter = "all" | "scheduled" | "played";
@@ -32,12 +32,21 @@ function formatDate(iso: string): string {
 }
 
 export function FixturesScreen() {
-  const { teams, fixtures, refetchFixtures, refetchMatches, refetchScoreReports } = useLeagueData();
+  const { teams, groups, fixtures: allFixtures, refetchFixtures, refetchMatches, refetchScoreReports } = useLeagueData();
   const { showSnackbar } = useSnackbar();
+  const [groupId, setGroupId] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [roundFilter, setRoundFilter] = useState<number | "">("");
   const [dateFilter, setDateFilter] = useState("");
   const [dialog, setDialog] = useState<DialogState>(null);
+
+  useEffect(() => {
+    if (!groupId && groups.length > 0) setGroupId(groups[0].id);
+    if (groupId && !groups.some((g) => g.id === groupId)) setGroupId(groups[0]?.id ?? "");
+  }, [groups, groupId]);
+
+  const fixtures = useMemo(() => allFixtures.filter((f) => f.groupId === groupId), [allFixtures, groupId]);
+  const selectedGroup = groups.find((g) => g.id === groupId);
 
   function teamName(id: string): string {
     return teams.find((t) => t.id === id)?.name ?? "Unknown entry";
@@ -86,7 +95,7 @@ export function FixturesScreen() {
 
   async function handleDeleteFixture(fixture: Fixture, deleteLinkedMatch: boolean) {
     try {
-      await fixturesApi.remove(fixture.id, deleteLinkedMatch);
+      await fixturesApi.remove(fixture.groupId, fixture.id, deleteLinkedMatch);
       await refreshAfterMutation();
       showSnackbar("Fixture deleted.");
     } catch (err) {
@@ -98,7 +107,7 @@ export function FixturesScreen() {
 
   async function handleClearFixtures() {
     try {
-      await fixturesApi.clear();
+      await fixturesApi.clear(groupId);
       await refreshAfterMutation();
       showSnackbar("Fixture list cleared.");
     } catch (err) {
@@ -112,126 +121,160 @@ export function FixturesScreen() {
     <AdminShellScaffold
       title="Fixtures"
       actions={
-        fixtures.length > 0 ? (
+        groupId ? (
           <PopupMenu
             trigger={<button className="btn btn-outlined btn-sm">⋯</button>}
             items={[
-              { label: "Shift all dates", onSelect: () => setDialog({ type: "shiftFixtures" }) },
-              { label: "Clear fixtures", onSelect: () => setDialog({ type: "clearFixtures" }), destructive: true },
+              { label: fixtures.length > 0 ? "Regenerate fixtures" : "Generate fixtures", onSelect: () => setDialog({ type: "generateFixtures" }) },
+              ...(fixtures.length > 0
+                ? [
+                    { label: "Shift all dates", onSelect: () => setDialog({ type: "shiftFixtures" }) },
+                    { label: "Clear fixtures", onSelect: () => setDialog({ type: "clearFixtures" }), destructive: true },
+                  ]
+                : []),
             ]}
           />
         ) : null
       }
     >
-      {fixtures.length === 0 ? (
-        <EmptyStateCard title="No fixtures generated" message="Generate a fixture list from the home screen to create a round-robin schedule." />
+      {groups.length === 0 ? (
+        <EmptyStateCard title="No groups yet" message="Create a group from the Groups screen before generating fixtures." />
       ) : (
         <>
           <div className="card responsive-row" style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
-            <strong>Filters</strong>
-            <div style={{ display: "flex", gap: 6 }}>
-              {(["all", "scheduled", "played"] as StatusFilter[]).map((status) => (
-                <button
-                  key={status}
-                  className={statusFilter === status ? "btn btn-filled btn-sm" : "btn btn-outlined btn-sm"}
-                  onClick={() => setStatusFilter(status)}
-                >
-                  {status === "all" ? "All" : status === "scheduled" ? "Scheduled" : "Played"}
-                </button>
-              ))}
-            </div>
-            <select value={roundFilter} onChange={(e) => setRoundFilter(e.target.value ? Number(e.target.value) : "")}>
-              <option value="">All rounds</option>
-              {rounds.map((r) => (
-                <option key={r} value={r}>
-                  Round {r}
+            <strong>Group</strong>
+            <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
                 </option>
               ))}
             </select>
-            <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-            {dateFilter && (
-              <button className="btn btn-text btn-sm" onClick={() => setDateFilter("")}>
-                Clear date
-              </button>
+            {selectedGroup && (
+              <span className="chip">
+                {selectedGroup.teamCount}
+                {selectedGroup.maxTeams !== null ? ` / ${selectedGroup.maxTeams}` : ""} teams
+              </span>
             )}
           </div>
 
-          {grouped.length === 0 ? (
-            <EmptyStateCard title="No fixtures match these filters" message="Try clearing one of the active filters to see more fixtures." />
+          {fixtures.length === 0 ? (
+            <EmptyStateCard
+              title="No fixtures generated"
+              message="Generate a round-robin schedule for this group's teams from the menu above."
+            />
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              {grouped.map(([round, roundFixtures]) => (
-                <div key={round}>
-                  <h3>Round {round}</h3>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(320px, 100%), 1fr))", gap: 12 }}>
-                    {roundFixtures.map((fixture) => (
-                      <div key={fixture.id} className="card" style={{ padding: 14 }}>
-                        <div
-                          style={{ cursor: "pointer" }}
-                          onClick={() =>
-                            fixture.match
-                              ? setDialog({ type: "editMatch", fixture })
-                              : setDialog({ type: "recordMatch", fixture })
-                          }
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <strong>
-                              {teamName(fixture.teamAId)} vs {teamName(fixture.teamBId)}
-                            </strong>
-                            {fixture.match && (
-                              <span style={{ fontWeight: 700 }}>
-                                {fixture.match.scoreA}-{fixture.match.scoreB}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ display: "flex", gap: 6, margin: "6px 0" }}>
-                            <span className="chip">Leg {fixture.leg}</span>
-                            <span className="chip">{fixture.match ? "Played" : "Scheduled"}</span>
-                          </div>
-                          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-on-surface-variant)" }}>
-                            {formatDate(fixture.date)}
-                            <br />
-                            {teamLabel(fixture.teamAId)} vs {teamLabel(fixture.teamBId)}
-                          </p>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                          <PopupMenu
-                            trigger={<button className="btn btn-text btn-sm">⋯</button>}
-                            items={[
-                              {
-                                label: fixture.match ? "Edit result" : "Record result",
-                                onSelect: () =>
-                                  setDialog(fixture.match ? { type: "editMatch", fixture } : { type: "recordMatch", fixture }),
-                              },
-                              { label: "Edit fixture", onSelect: () => setDialog({ type: "editFixture", fixture }) },
-                              ...(fixture.match
-                                ? [{ label: "Delete result", onSelect: () => setDialog({ type: "deleteResult", fixture }), destructive: true }]
-                                : []),
-                              { label: "Delete fixture", onSelect: () => setDialog({ type: "deleteFixture", fixture, deleteLinkedMatch: false }), destructive: true, divider: true },
-                              ...(fixture.match
-                                ? [
-                                    {
-                                      label: "Delete fixture and result",
-                                      onSelect: () => setDialog({ type: "deleteFixture", fixture, deleteLinkedMatch: true }),
-                                      destructive: true,
-                                    },
-                                  ]
-                                : []),
-                            ]}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+            <>
+              <div className="card responsive-row" style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+                <strong>Filters</strong>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {(["all", "scheduled", "played"] as StatusFilter[]).map((status) => (
+                    <button
+                      key={status}
+                      className={statusFilter === status ? "btn btn-filled btn-sm" : "btn btn-outlined btn-sm"}
+                      onClick={() => setStatusFilter(status)}
+                    >
+                      {status === "all" ? "All" : status === "scheduled" ? "Scheduled" : "Played"}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
+                <select value={roundFilter} onChange={(e) => setRoundFilter(e.target.value ? Number(e.target.value) : "")}>
+                  <option value="">All rounds</option>
+                  {rounds.map((r) => (
+                    <option key={r} value={r}>
+                      Round {r}
+                    </option>
+                  ))}
+                </select>
+                <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+                {dateFilter && (
+                  <button className="btn btn-text btn-sm" onClick={() => setDateFilter("")}>
+                    Clear date
+                  </button>
+                )}
+              </div>
+
+              {grouped.length === 0 ? (
+                <EmptyStateCard title="No fixtures match these filters" message="Try clearing one of the active filters to see more fixtures." />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                  {grouped.map(([round, roundFixtures]) => (
+                    <div key={round}>
+                      <h3>Round {round}</h3>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(320px, 100%), 1fr))", gap: 12 }}>
+                        {roundFixtures.map((fixture) => (
+                          <div key={fixture.id} className="card" style={{ padding: 14 }}>
+                            <div
+                              style={{ cursor: "pointer" }}
+                              onClick={() =>
+                                fixture.match
+                                  ? setDialog({ type: "editMatch", fixture })
+                                  : setDialog({ type: "recordMatch", fixture })
+                              }
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                <strong>
+                                  {teamName(fixture.teamAId)} vs {teamName(fixture.teamBId)}
+                                </strong>
+                                {fixture.match && (
+                                  <span style={{ fontWeight: 700 }}>
+                                    {fixture.match.scoreA}-{fixture.match.scoreB}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ display: "flex", gap: 6, margin: "6px 0" }}>
+                                <span className="chip">Leg {fixture.leg}</span>
+                                <span className={`chip ${fixture.match ? "chip-success" : ""}`}>
+                                  {fixture.match ? "Played" : "Scheduled"}
+                                </span>
+                              </div>
+                              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-on-surface-variant)" }}>
+                                {formatDate(fixture.date)}
+                                <br />
+                                {teamLabel(fixture.teamAId)} vs {teamLabel(fixture.teamBId)}
+                              </p>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                              <PopupMenu
+                                trigger={<button className="btn btn-text btn-sm">⋯</button>}
+                                items={[
+                                  {
+                                    label: fixture.match ? "Edit result" : "Record result",
+                                    onSelect: () =>
+                                      setDialog(fixture.match ? { type: "editMatch", fixture } : { type: "recordMatch", fixture }),
+                                  },
+                                  { label: "Edit fixture", onSelect: () => setDialog({ type: "editFixture", fixture }) },
+                                  ...(fixture.match
+                                    ? [{ label: "Delete result", onSelect: () => setDialog({ type: "deleteResult", fixture }), destructive: true }]
+                                    : []),
+                                  { label: "Delete fixture", onSelect: () => setDialog({ type: "deleteFixture", fixture, deleteLinkedMatch: false }), destructive: true, divider: true },
+                                  ...(fixture.match
+                                    ? [
+                                        {
+                                          label: "Delete fixture and result",
+                                          onSelect: () => setDialog({ type: "deleteFixture", fixture, deleteLinkedMatch: true }),
+                                          destructive: true,
+                                        },
+                                      ]
+                                    : []),
+                                ]}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
 
       {dialog?.type === "recordMatch" && (
         <RecordMatchDialog
+          groupId={dialog.fixture.groupId}
           initial={{ teamAId: dialog.fixture.teamAId, teamBId: dialog.fixture.teamBId, date: dialog.fixture.date, fixtureId: dialog.fixture.id }}
           onClose={() => setDialog(null)}
           onSaved={() => {
@@ -242,6 +285,7 @@ export function FixturesScreen() {
       )}
       {dialog?.type === "editMatch" && dialog.fixture.match && (
         <RecordMatchDialog
+          groupId={dialog.fixture.groupId}
           title="Edit Match Result"
           submitLabel="Update"
           initial={{
@@ -270,11 +314,17 @@ export function FixturesScreen() {
           }}
         />
       )}
-      {dialog?.type === "generateFixtures" && (
-        <GenerateFixturesDialog hasExistingFixtures={fixtures.length > 0} onClose={() => setDialog(null)} onGenerated={() => refreshAfterMutation()} />
+      {dialog?.type === "generateFixtures" && groupId && (
+        <GenerateFixturesDialog
+          groupId={groupId}
+          hasExistingFixtures={fixtures.length > 0}
+          onClose={() => setDialog(null)}
+          onGenerated={() => refreshAfterMutation()}
+        />
       )}
-      {dialog?.type === "shiftFixtures" && (
+      {dialog?.type === "shiftFixtures" && groupId && (
         <ShiftFixturesDialog
+          groupId={groupId}
           onClose={() => setDialog(null)}
           onShifted={() => {
             refetchFixtures();

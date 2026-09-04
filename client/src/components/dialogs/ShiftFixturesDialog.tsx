@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Modal } from "../Modal";
 import { fixturesApi } from "../../api/fixtures";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 
-export function ShiftFixturesDialog({ onClose, onShifted }: { onClose: () => void; onShifted: () => void }) {
+export function ShiftFixturesDialog({ groupId, onClose, onShifted }: { groupId: string; onClose: () => void; onShifted: () => void }) {
   const [days, setDays] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -22,7 +22,7 @@ export function ShiftFixturesDialog({ onClose, onShifted }: { onClose: () => voi
 
     setIsSaving(true);
     try {
-      await fixturesApi.shift(parsed);
+      await fixturesApi.shift(groupId, parsed);
       onShifted();
       onClose();
     } catch (err) {

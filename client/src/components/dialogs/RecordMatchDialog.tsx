@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "../Modal";
 import { matchesApi } from "../../api/matches";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 import { useLeagueData } from "../../state/LeagueDataContext";
 
 export interface RecordMatchInitial {
@@ -15,19 +15,22 @@ export interface RecordMatchInitial {
 }
 
 export function RecordMatchDialog({
+  groupId,
   initial,
   title = "Record Match",
   submitLabel = "Save",
   onClose,
   onSaved,
 }: {
+  groupId: string;
   initial?: RecordMatchInitial;
   title?: string;
   submitLabel?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { teams } = useLeagueData();
+  const { teams: allTeams } = useLeagueData();
+  const teams = allTeams.filter((t) => t.groupIds.includes(groupId));
   const [teamAId, setTeamAId] = useState(initial?.teamAId ?? "");
   const [teamBId, setTeamBId] = useState(initial?.teamBId ?? "");
   const [scoreA, setScoreA] = useState(initial?.scoreA !== undefined ? String(initial.scoreA) : "");
@@ -52,6 +55,7 @@ export function RecordMatchDialog({
     setIsSaving(true);
     try {
       const input = {
+        groupId,
         teamAId,
         teamBId,
         scoreA: parsedA,

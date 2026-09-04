@@ -6,7 +6,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useLeagueData } from "../state/LeagueDataContext";
 import { useSnackbar } from "../state/SnackbarContext";
 import { archivesApi } from "../api/archives";
-import { ApiError } from "../api/client";
+import { ApiError } from "../errors";
 import type { ArchivedSeason } from "../api/types";
 
 type DialogState = null | { type: "restore"; archive: ArchivedSeason } | { type: "delete"; archive: ArchivedSeason };

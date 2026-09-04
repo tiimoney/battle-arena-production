@@ -1,0 +1,64 @@
+.users-table-scroll {
+  overflow-x: auto;
+  border-radius: var(--card-radius);
+}
+
+.users-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 720px;
+  font-size: 0.9rem;
+}
+
+.users-table th {
+  text-align: left;
+  color: var(--color-on-surface-variant);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider-color);
+  white-space: nowrap;
+}
+
+.users-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider-color);
+  vertical-align: middle;
+}
+
+.users-table tr:hover td {
+  background: var(--color-surface-high);
+}
+
+.users-table tr.users-row-inactive td {
+  opacity: 0.7;
+}
+
+.users-table-avatar {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.users-table-name {
+  font-weight: 700;
+}
+
+.users-table-email {
+  font-size: 0.8rem;
+  color: var(--color-on-surface-variant);
+}
+
+.users-table-actions {
+  text-align: right;
+}

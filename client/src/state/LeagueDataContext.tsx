@@ -1,27 +1,32 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { teamsApi } from "../api/teams";
 import { fixturesApi } from "../api/fixtures";
 import { matchesApi } from "../api/matches";
 import { scoreReportsApi } from "../api/scoreReports";
 import { archivesApi } from "../api/archives";
-import type { ArchivedSeason, Fixture, MatchResult, ScoreReport, Team } from "../api/types";
+import { settingsApi } from "../api/settings";
+import { groupsApi } from "../api/groups";
+import type { ArchivedSeason, Fixture, Group, MatchResult, ScoreReport, Team, TournamentSettings } from "../api/types";
+import { DEFAULT_TOURNAMENT_SETTINGS } from "../logic/leagueSnapshot";
 import { useAuth } from "./AuthContext";
-import { computeStandings } from "./standings";
 
 interface LeagueDataContextValue {
   teams: Team[];
+  groups: Group[];
   fixtures: Fixture[];
   matches: MatchResult[];
   scoreReports: ScoreReport[];
   archives: ArchivedSeason[];
+  tournamentSettings: TournamentSettings;
   isLoading: boolean;
-  standings: ReturnType<typeof computeStandings>;
   refetchAll: () => Promise<void>;
   refetchTeams: () => Promise<void>;
+  refetchGroups: () => Promise<void>;
   refetchFixtures: () => Promise<void>;
   refetchMatches: () => Promise<void>;
   refetchScoreReports: () => Promise<void>;
   refetchArchives: () => Promise<void>;
+  refetchSettings: () => Promise<void>;
 }
 
 const LeagueDataContext = createContext<LeagueDataContextValue | null>(null);
@@ -29,59 +34,82 @@ const LeagueDataContext = createContext<LeagueDataContextValue | null>(null);
 export function LeagueDataProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [scoreReports, setScoreReports] = useState<ScoreReport[]>([]);
   const [archives, setArchives] = useState<ArchivedSeason[]>([]);
+  const [tournamentSettings, setTournamentSettings] = useState<TournamentSettings>(DEFAULT_TOURNAMENT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
 
   const refetchTeams = useCallback(async () => setTeams(await teamsApi.list()), []);
-  const refetchFixtures = useCallback(async () => setFixtures(await fixturesApi.list()), []);
+  const refetchGroups = useCallback(async () => setGroups(await groupsApi.list()), []);
+  // Fixtures live per-group -- fetch every group's fixture list (already joined with
+  // that group's match results) and flatten into one array, same shape screens
+  // already expect, with `.groupId` on each fixture for screens that need to scope
+  // to a single group.
+  const refetchFixtures = useCallback(async () => {
+    const currentGroups = await groupsApi.list();
+    const perGroup = await Promise.all(currentGroups.map((g) => fixturesApi.list(g.id)));
+    setFixtures(perGroup.flat());
+  }, []);
   const refetchMatches = useCallback(async () => setMatches(await matchesApi.list()), []);
   const refetchScoreReports = useCallback(async () => setScoreReports(await scoreReportsApi.list()), []);
   const refetchArchives = useCallback(async () => setArchives(await archivesApi.list()), []);
+  const refetchSettings = useCallback(async () => setTournamentSettings(await settingsApi.get()), []);
 
   const refetchAll = useCallback(async () => {
     setIsLoading(true);
     try {
-      await Promise.all([refetchTeams(), refetchFixtures(), refetchMatches(), refetchScoreReports(), refetchArchives()]);
+      await Promise.all([
+        refetchTeams(),
+        refetchGroups(),
+        refetchFixtures(),
+        refetchMatches(),
+        refetchScoreReports(),
+        refetchArchives(),
+        refetchSettings(),
+      ]);
     } finally {
       setIsLoading(false);
     }
-  }, [refetchTeams, refetchFixtures, refetchMatches, refetchScoreReports, refetchArchives]);
+  }, [refetchTeams, refetchGroups, refetchFixtures, refetchMatches, refetchScoreReports, refetchArchives, refetchSettings]);
 
   useEffect(() => {
     if (profile) {
       refetchAll();
     } else {
       setTeams([]);
+      setGroups([]);
       setFixtures([]);
       setMatches([]);
       setScoreReports([]);
       setArchives([]);
+      setTournamentSettings(DEFAULT_TOURNAMENT_SETTINGS);
       setIsLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id]);
 
-  const standings = useMemo(() => computeStandings(teams, matches), [teams, matches]);
-
   return (
     <LeagueDataContext.Provider
       value={{
         teams,
+        groups,
         fixtures,
         matches,
         scoreReports,
         archives,
+        tournamentSettings,
         isLoading,
-        standings,
         refetchAll,
         refetchTeams,
+        refetchGroups,
         refetchFixtures,
         refetchMatches,
         refetchScoreReports,
         refetchArchives,
+        refetchSettings,
       }}
     >
       {children}

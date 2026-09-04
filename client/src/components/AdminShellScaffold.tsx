@@ -5,11 +5,32 @@ import "./AdminShellScaffold.css";
 
 const NAV_ITEMS = [
   { to: "/admin", label: "Dashboard", icon: "🏠", end: true },
+  { to: "/admin/groups", label: "Groups", icon: "🗂️" },
   { to: "/admin/fixtures", label: "Fixtures", icon: "📅" },
   { to: "/admin/matches", label: "Match History", icon: "🕘" },
   { to: "/admin/archives", label: "Archives", icon: "🗄️" },
   { to: "/admin/users", label: "Users", icon: "👥" },
+  { to: "/admin/support", label: "Support", icon: "💬" },
+  { to: "/standings", label: "Standings", icon: "🏆" },
 ];
+
+function HamburgerButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="hamburger-btn mobile-nav-toggle"
+      aria-label={open ? "Close menu" : "Open menu"}
+      aria-expanded={open}
+      onClick={onClick}
+    >
+      <span className={`hamburger-icon${open ? " open" : ""}`} aria-hidden>
+        <span />
+        <span />
+        <span />
+      </span>
+    </button>
+  );
+}
 
 export function AdminShellScaffold({
   title,
@@ -55,30 +76,33 @@ export function AdminShellScaffold({
 
       {/* Mobile nav is new vs. the original Flutter app, which had no nav at all
           below its 1100px desktop-rail breakpoint -- a deliberate UX improvement. */}
-      {mobileNavOpen && (
-        <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)}>
-          <nav className="mobile-nav" onClick={(e) => e.stopPropagation()}>
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => `mobile-nav-link${isActive ? " active" : ""}`}
-                onClick={() => setMobileNavOpen(false)}
-              >
-                <span aria-hidden>{item.icon}</span> {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
-      )}
+      <div className={`mobile-nav-backdrop${mobileNavOpen ? " open" : ""}`} onClick={() => setMobileNavOpen(false)}>
+        <nav className="mobile-nav" onClick={(e) => e.stopPropagation()}>
+          <div className="mobile-nav-header">
+            <div className="admin-rail-brand">
+              <BrandLogo size={40} />
+              <div className="admin-rail-title">Mocheso League</div>
+            </div>
+            <HamburgerButton open onClick={() => setMobileNavOpen(false)} />
+          </div>
+          {NAV_ITEMS.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => `mobile-nav-link${isActive ? " active" : ""}`}
+              onClick={() => setMobileNavOpen(false)}
+            >
+              <span aria-hidden>{item.icon}</span> {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </div>
 
       <div className="admin-content">
         <header className="admin-header">
-          <button className="mobile-nav-toggle btn btn-outlined btn-sm" onClick={() => setMobileNavOpen(true)}>
-            ☰ Menu
-          </button>
-          <div>
+          <HamburgerButton open={false} onClick={() => setMobileNavOpen(true)} />
+          <div className="admin-header-titles">
             <h1 className="admin-header-title">{title}</h1>
             <div className="admin-header-subtitle">Desktop admin workspace</div>
           </div>

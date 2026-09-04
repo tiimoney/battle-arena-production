@@ -5,10 +5,13 @@ import { AuthScreen } from "./screens/AuthScreen";
 import { TeamAssignmentScreen } from "./screens/TeamAssignmentScreen";
 import { CompetitorHomeScreen } from "./screens/CompetitorHomeScreen";
 import { DashboardScreen } from "./screens/DashboardScreen";
+import { GroupsScreen } from "./screens/GroupsScreen";
 import { FixturesScreen } from "./screens/FixturesScreen";
 import { MatchHistoryScreen } from "./screens/MatchHistoryScreen";
 import { ArchivedSeasonsScreen } from "./screens/ArchivedSeasonsScreen";
 import { UserManagementScreen } from "./screens/UserManagementScreen";
+import { SupportInboxScreen } from "./screens/SupportInboxScreen";
+import { StandingsScreen } from "./screens/StandingsScreen";
 
 function LoadingScreen({ label }: { label: string }) {
   return (
@@ -51,18 +54,26 @@ function Gate() {
     return <TeamAssignmentScreen />;
   }
 
-  if (profile.role === "admin") {
-    return (
-      <Routes>
-        <Route path="/admin" element={<DashboardScreen />} />
-        <Route path="/admin/fixtures" element={<FixturesScreen />} />
-        <Route path="/admin/matches" element={<MatchHistoryScreen />} />
-        <Route path="/admin/archives" element={<ArchivedSeasonsScreen />} />
-        <Route path="/admin/users" element={<UserManagementScreen />} />
-        <Route path="*" element={<Navigate to="/admin" replace />} />
-      </Routes>
-    );
-  }
-
-  return <CompetitorHomeScreen />;
+  return (
+    <Routes>
+      <Route path="/standings" element={<StandingsScreen />} />
+      {profile.role === "admin" ? (
+        <>
+          <Route path="/admin" element={<DashboardScreen />} />
+          <Route path="/admin/groups" element={<GroupsScreen />} />
+          <Route path="/admin/fixtures" element={<FixturesScreen />} />
+          <Route path="/admin/matches" element={<MatchHistoryScreen />} />
+          <Route path="/admin/archives" element={<ArchivedSeasonsScreen />} />
+          <Route path="/admin/users" element={<UserManagementScreen />} />
+          <Route path="/admin/support" element={<SupportInboxScreen />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </>
+      ) : (
+        <>
+          <Route path="/" element={<CompetitorHomeScreen />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </>
+      )}
+    </Routes>
+  );
 }

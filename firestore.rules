@@ -1,0 +1,369 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function emailVerified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function currentProfile() {
+      return get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data;
+    }
+
+    // Backs the admin "Deactivate" action (client/src/api/users.ts's setDisabled) --
+    // required on top of signedIn() for every self-service WRITE that grants
+    // something (registering/joining an entry, self-joining a group, submitting a
+    // score report), so a disabled account can't act even with a still-valid Firebase
+    // Auth session, not just while the app's own AuthContext is signing it out on
+    // load. Reads stay open for a disabled account -- there's nothing sensitive about
+    // read access, and it keeps things simple (matches every other read rule here).
+    function isActiveProfile() {
+      // .get(key, default) rather than dot access -- most existing profiles predate
+      // this field and don't have it at all (not even set to false), and dot-accessing
+      // a genuinely absent map key throws in rules (denying the request), not "null".
+      return currentProfile().get('disabled', false) != true;
+    }
+
+    function isNonEmptyString(value, maxLen) {
+      return value is string && value.size() > 0 && value.size() <= maxLen;
+    }
+
+    // meta/adminExists doesn't exist yet, or exists but hasn't been flipped true --
+    // i.e. no admin profile has been created anywhere in the project yet. Backs the
+    // bootstrap check below.
+    function noAdminExistsYet() {
+      return !exists(/databases/$(database)/documents/meta/adminExists) ||
+        get(/databases/$(database)/documents/meta/adminExists).data.exists != true;
+    }
+
+    // A competitor may create a brand-new team/individual entry for themselves --
+    // exactly one member, which must be them -- as long as they're not already on a
+    // team. entryType may be 'team' (an open roster others can later join, up to the
+    // admin's max-team-size setting) or 'individual'. Group membership lives in the
+    // separate team_groups collection (below), not on this document, so there's
+    // nothing group-related to validate here. The admin's max-team-size limit is
+    // enforced client-side only (see client/src/api/teams.ts) -- it's tournament
+    // configuration, not a security boundary, so a simpler client-side check is a
+    // reasonable tradeoff here rather than fragile null-aware numeric comparisons in
+    // rules.
+    function isValidTeamSelfCreate(data) {
+      return signedIn() &&
+        isActiveProfile() &&
+        currentProfile().teamId == null &&
+        isNonEmptyString(data.name, 200) &&
+        data.members.size() == 1 &&
+        data.members[0].linkedUserId == request.auth.uid &&
+        isNonEmptyString(data.members[0].name, 200) &&
+        data.teamSize == 1 &&
+        (data.entryType == 'team' || data.entryType == 'individual');
+    }
+
+    // A competitor may join an existing 'team'-type entry by appending themselves as
+    // a new member, as long as they're not already on a team (which also rules out
+    // already being a member of this one -- one team at a time is a global
+    // invariant) and every existing member is preserved exactly (no other field on
+    // the team, and no other member, changes as a side effect). The client always
+    // appends the new member at the end of the array (see client/src/api/teams.ts),
+    // so checking that specific position is sufficient -- Firestore's rules
+    // language doesn't support arbitrary lambda predicates over lists (no
+    // list.exists()/list.all() here), only size(), indexing, and hasAll()/hasAny().
+    function isValidTeamSelfJoin(before, after) {
+      return signedIn() &&
+        isActiveProfile() &&
+        currentProfile().teamId == null &&
+        before.entryType == 'team' &&
+        after.name == before.name &&
+        after.entryType == before.entryType &&
+        after.id == before.id &&
+        after.teamSize == before.teamSize + 1 &&
+        after.members.size() == before.members.size() + 1 &&
+        after.members.hasAll(before.members) &&
+        after.members[before.members.size()].linkedUserId == request.auth.uid &&
+        isNonEmptyString(after.members[before.members.size()].name, 200);
+    }
+
+    // The new member always lands at the last array position -- both a brand-new
+    // self-registered entry (isValidTeamSelfCreate, one member) and joining an
+    // existing one (isValidTeamSelfJoin, appended at the end) guarantee this. Used
+    // below to prove a profile.teamId self-transition corresponds to a real,
+    // already-committed roster slot rather than an arbitrary team id the caller
+    // simply typed in.
+    function isLastMemberOfTeam(teamId, uid) {
+      let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
+      return team.members[team.members.size() - 1].linkedUserId == uid;
+    }
+
+    // The mirror-image write on the group side of a join/leave: a signed-in user may
+    // nudge a group's teamCount by exactly one in either direction, with nothing
+    // else on the group document changing. Rules evaluate each document's write
+    // independently, so this can't be tied to "only if there was a matching teams/
+    // {teamId} write in the same transaction" -- same accepted tradeoff as the cap
+    // check above (an app-layer counter, not a hard security boundary).
+    function isValidGroupTeamCountChange(before, after) {
+      return signedIn() &&
+        after.name == before.name &&
+        after.maxTeams == before.maxTeams &&
+        after.createdAt == before.createdAt &&
+        after.fixtures == before.fixtures &&
+        (after.teamCount == before.teamCount + 1 || after.teamCount == before.teamCount - 1);
+    }
+
+    // Each team/individual entry is its own document specifically so the rules above
+    // can be precise -- validating "you may add yourself, and only yourself, to
+    // exactly one team" isn't expressible against a single document holding every
+    // team's data at once (Firestore rules can't diff two arbitrary positions inside
+    // one array field).
+    match /teams/{teamId} {
+      allow read: if signedIn();
+      allow create: if isAdmin() || isValidTeamSelfCreate(request.resource.data);
+      allow update: if isAdmin() || isValidTeamSelfJoin(resource.data, request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // A group ("episode") is its own independent mini-league -- name, cap, and
+    // fixtures stay fully admin-write (fixture generation/editing is already
+    // admin-only in this app; groups don't change that). teamCount is the one
+    // exception, self-writable in lockstep with a team_groups link create/delete
+    // (see isValidGroupTeamCountChange above).
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isValidGroupTeamCountChange(resource.data, request.resource.data);
+    }
+
+    // The many-to-many between teams and groups, modeled as its own junction
+    // collection (one doc per {teamId, groupId} pair, id "{teamId}_{groupId}")
+    // instead of an array field on either side -- two clean one-to-many
+    // relationships rather than a repeating group. A team's own linked competitor
+    // may create a link for their own team (self-join a group) or delete one
+    // (self-leave); admin can do either for any team. The per-group max-teams cap is
+    // enforced client-side only (see client/src/api/groups.ts), same reasoning as
+    // the max-team-size limit above: rules can't safely run a "count links for this
+    // group" aggregate for a non-admin caller.
+    match /team_groups/{linkId} {
+      allow read: if signedIn();
+      allow create: if isAdmin() ||
+        (signedIn() && isActiveProfile() &&
+         currentProfile().teamId == request.resource.data.teamId &&
+         linkId == request.resource.data.teamId + '_' + request.resource.data.groupId);
+      allow delete: if isAdmin() ||
+        (signedIn() && currentProfile().teamId == resource.data.teamId);
+    }
+
+    // Public directory reserving a unique, normalized team name -> {teamId}. Anyone
+    // signed in may claim a fresh name when self-registering a new entry; only an
+    // admin renames/removes one (self-service never renames an existing entry, only
+    // creates new ones or joins existing ones as-is).
+    match /teamNames/{name} {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // Admin-configured tournament name + max players per entry.
+    match /settings/{document=**} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Singleton flag: has any admin profile ever been created? Exists purely so a
+    // brand-new (non-admin) user can determine the bootstrap "first account ever
+    // becomes admin" rule without needing to query the profiles collection filtered
+    // by role -- which Firestore would reject outright, since a non-admin isn't
+    // allowed to read *other* people's profile documents and can't prove a `list`
+    // query is safe for a result set it might not be allowed to see. World-readable
+    // (there's nothing sensitive in a boolean), and once set to true it can never be
+    // unset -- only the transaction that creates the very first admin profile sets
+    // it, and it stays true forever after.
+    match /meta/adminExists {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    // Public directory mapping a unique, normalized display name -> {uid, email,
+    // createdAt}. Deliberately world-readable (signed in or not): it's how the
+    // client resolves a display name to an email before sign-in (Firebase Auth's own
+    // sign-in call only accepts an email) and how sign-up checks name availability --
+    // there's no backend to do this lookup server-side in this architecture. Emails
+    // aren't treated as secret elsewhere in this app either (the admin UI already
+    // lists them). This doc *is* the uniqueness enforcement: `create` only succeeds
+    // when the name isn't already taken (Firestore itself refuses `create` against
+    // an existing document, and `update`/`delete` below require already owning it or
+    // being admin), so this is a real constraint, not just a client-side
+    // check-then-write race. Admin can also update/delete any entry -- specifically
+    // so a stale, never-verified sign-up's reservation can be freed up (see
+    // client/src/api/auth.ts's removePendingSignUp); it doesn't touch the underlying
+    // Firebase Auth account, which a client-only app has no way to delete.
+    match /usernames/{name} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    match /profiles/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      // A profile can only ever be created once (by definition -- `create` only
+      // matches when no document exists yet at this path), and only for yourself.
+      // Requiring a verified email here gates brand-new sign-ups; it does NOT affect
+      // profiles that already exist (an update, not a create), which is exactly the
+      // "grandfather existing accounts" behavior this app needs: real accounts from
+      // before this feature existed never went through a verification step, and
+      // simply already having a profile document is what exempts them.
+      //
+      // The bootstrap "first account ever becomes admin" rule USED to be enforced
+      // client-side only -- which meant any verified, signed-in user could grant
+      // themselves admin by writing role: 'admin' directly to their own
+      // not-yet-existing profile doc, bypassing the app entirely. noAdminExistsYet()
+      // makes it a real, enforced invariant: role may only be 'admin' on create if no
+      // admin exists anywhere yet, mirroring exactly what client/src/api/auth.ts's
+      // ensureProfile() already does. teamId must start null -- team assignment only
+      // ever happens through the specific, separately-validated transitions on
+      // update below, never bundled into the initial profile write.
+      allow create: if signedIn() && request.auth.uid == userId && emailVerified() &&
+        isNonEmptyString(request.resource.data.displayName, 200) &&
+        request.resource.data.email is string &&
+        (request.resource.data.role == 'competitor' || (request.resource.data.role == 'admin' && noAdminExistsYet())) &&
+        request.resource.data.teamId == null;
+      // teamId and displayName are deliberately self-settable (not just
+      // admin-settable): teamId is what lets a competitor register themselves into a
+      // team/entry, and displayName is what lets anyone rename themselves from their
+      // profile settings (client/src/api/auth.ts's updateDisplayName swaps the
+      // usernames/ reservation in the same transaction as the friendly uniqueness
+      // layer -- not enforced here, same tradeoff as every other reservation
+      // collection in this app). role and email remain admin-only/immutable.
+      //
+      // teamId itself is tightly bound, not a free-form self-editable field: a
+      // non-admin caller may only move it from null to a real team they've just
+      // become the last-added member of (isLastMemberOfTeam, matching exactly how
+      // registerNewEntry/joinTeam write the team doc in the same client-side
+      // transaction), or leave it unchanged. Without this, any competitor could
+      // patch their own teamId straight to someone else's team id and immediately
+      // gain that team's score-reporting rights with no roster membership at all.
+      allow update: if signedIn() &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == userId &&
+            // .get(key, default) here too -- see isActiveProfile's comment above.
+            resource.data.get('disabled', false) != true &&
+            request.resource.data.get('disabled', false) == resource.data.get('disabled', false) &&
+            request.resource.data.get('removedAt', null) == resource.data.get('removedAt', null) &&
+            request.resource.data.role == resource.data.role &&
+            request.resource.data.email == resource.data.email &&
+            isNonEmptyString(request.resource.data.displayName, 200) &&
+            (
+              request.resource.data.teamId == resource.data.teamId ||
+              (
+                resource.data.teamId == null &&
+                request.resource.data.teamId is string &&
+                isLastMemberOfTeam(request.resource.data.teamId, request.auth.uid)
+              )
+            )
+          )
+        );
+      allow delete: if false;
+    }
+
+    // Archived seasons only -- teams and fixtures both moved out to their own
+    // collections (teams/{id}, groups/{id}) to support self-registration and
+    // per-group writes. Archives are historical, immutable snapshots, not tied to
+    // any live group, so the single-document approach is still fine for them.
+    match /league_state/{document=**} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // A competitor's own submitted score_reports doc is the thing their consensus
+    // write below has to match exactly -- proving the result they're writing was
+    // never fabricated out of thin air, only ever "confirmed" against a report they
+    // already filed under their own identity (reporterTeamId is itself bound to
+    // currentProfile().teamId in score_reports' own create rule, so this transitively
+    // ties back to real roster membership).
+    function isValidConsensusMatch(resultId, data) {
+      let report = get(/databases/$(database)/documents/score_reports/$(data.fixtureId + '_' + request.auth.uid)).data;
+      return signedIn() &&
+        data.id == resultId &&
+        data.fixtureId is string && data.fixtureId == report.fixtureId &&
+        data.groupId is string && data.groupId == report.groupId &&
+        data.teamAId == report.teamAId && data.teamBId == report.teamBId &&
+        data.scoreA is int && data.scoreA >= 0 && data.scoreA == report.teamAScore &&
+        data.scoreB is int && data.scoreB >= 0 && data.scoreB == report.teamBScore;
+    }
+
+    // Match results are admin-write by default (recording/editing a result directly
+    // is an admin-only action), with one narrow exception: the client's own
+    // auto-reconciliation (client/src/api/scoreReports.ts's reconcileFixtureReports,
+    // triggered whenever a competitor submits a score report that happens to match
+    // an opposing team's) writes here as that competitor, not as admin -- this was
+    // previously simply rejected by these rules, silently breaking consensus
+    // auto-approval for every non-admin submission. isValidConsensusMatch scopes
+    // that one path down tightly instead of just opening this collection up.
+    match /approved_results/{resultId} {
+      allow read: if signedIn();
+      allow create, update: if isAdmin() || isValidConsensusMatch(resultId, request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /score_reports/{reportId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() &&
+        isActiveProfile() &&
+        reportId == request.resource.data.fixtureId + '_' + request.auth.uid &&
+        request.resource.data.reporterUserId == request.auth.uid &&
+        request.resource.data.reporterTeamId == currentProfile().teamId &&
+        request.resource.data.fixtureId is string &&
+        request.resource.data.groupId is string &&
+        request.resource.data.teamAId is string && request.resource.data.teamBId is string &&
+        request.resource.data.teamAScore is int && request.resource.data.teamAScore >= 0 &&
+        request.resource.data.teamBScore is int && request.resource.data.teamBScore >= 0;
+      allow delete: if signedIn() &&
+        (resource.data.reporterUserId == request.auth.uid || isAdmin());
+    }
+
+    // A signed-in user (admin or competitor) logging a bug report, suggestion, or
+    // support question. userDisplayName/userEmail are a snapshot of the caller's own
+    // profile at submission time, re-validated against currentProfile() here so the
+    // admin inbox can trust them without cross-referencing profiles/ -- and so a
+    // ticket can never be filed claiming to be from someone else.
+    function isValidSupportTicketCreate(data) {
+      return signedIn() &&
+        data.userId == request.auth.uid &&
+        data.userDisplayName == currentProfile().displayName &&
+        data.userEmail == currentProfile().email &&
+        (data.category == 'issue' || data.category == 'suggestion' || data.category == 'question') &&
+        isNonEmptyString(data.message, 2000) &&
+        data.status == 'open' &&
+        data.resolvedAt == null;
+    }
+
+    // Only an admin may change a ticket's status (mark resolved/reopen) -- and
+    // nothing else about the ticket may change when they do.
+    function isValidSupportTicketStatusChange(before, after) {
+      return isAdmin() &&
+        after.userId == before.userId &&
+        after.userDisplayName == before.userDisplayName &&
+        after.userEmail == before.userEmail &&
+        after.category == before.category &&
+        after.message == before.message &&
+        after.createdAt == before.createdAt &&
+        (after.status == 'open' || after.status == 'resolved');
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidSupportTicketCreate(request.resource.data);
+      allow update: if isValidSupportTicketStatusChange(resource.data, request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

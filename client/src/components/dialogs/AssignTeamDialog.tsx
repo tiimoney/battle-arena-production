@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "../Modal";
 import { usersApi } from "../../api/users";
-import { ApiError } from "../../api/client";
+import { ApiError } from "../../errors";
 import { useLeagueData } from "../../state/LeagueDataContext";
 import type { Profile } from "../../api/types";
 
