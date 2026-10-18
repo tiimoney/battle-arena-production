@@ -1,0 +1,12 @@
+.standings-kiosk-table .league-table {
+  font-size: clamp(0.95rem, 1.6vh, 1.4rem);
+}
+
+.standings-kiosk-table .league-table th {
+  font-size: clamp(0.7rem, 1vh, 0.95rem);
+  padding: clamp(6px, 1vh, 14px) clamp(8px, 1vw, 18px);
+}
+
+.standings-kiosk-table .league-table td {
+  padding: clamp(6px, 1.2vh, 16px) clamp(8px, 1vw, 18px);
+}

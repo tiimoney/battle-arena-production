@@ -34,6 +34,36 @@ export function GroupsScreen() {
     return fixtures.filter((f) => f.groupId === groupId).length;
   }
 
+  // Feeds the Scoreboard tool's roster import (Stream Overlay/Scoreboard) --
+  // a plain client-side read of data already in memory via useLeagueData(),
+  // no new Firestore access. Kept inline rather than in api/ since it's a
+  // pure local transform + browser download, not a backend call.
+  function handleExportRoster(group: Group) {
+    const roster = {
+      groupId: group.id,
+      groupName: group.name,
+      exportedAt: new Date().toISOString(),
+      teams: teamsIn(group.id).map((team) => ({
+        id: team.id,
+        name: team.name,
+        members: team.members.map((member) => member.name),
+      })),
+    };
+
+    const slug = group.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "group";
+    const blob = new Blob([JSON.stringify(roster, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slug}-roster.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    showSnackbar(`Exported ${roster.teams.length} team${roster.teams.length === 1 ? "" : "s"} from "${group.name}".`);
+  }
+
   async function handleDelete(group: Group) {
     setBusy(true);
     try {
@@ -76,6 +106,7 @@ export function GroupsScreen() {
                   trigger={<button className="btn btn-text btn-sm">⋯</button>}
                   items={[
                     { label: "Manage teams", onSelect: () => setDialog({ type: "manageTeams", group }) },
+                    { label: "Export roster", onSelect: () => handleExportRoster(group) },
                     { label: "Edit group", onSelect: () => setDialog({ type: "edit", group }) },
                     { label: "Archive episode", onSelect: () => setDialog({ type: "archive", group }) },
                     { label: "Delete group", onSelect: () => setDialog({ type: "delete", group }), destructive: true, divider: true },
