@@ -7,12 +7,15 @@ import { EmptyStateCard } from "../components/EmptyStateCard";
 import { SubmitScoreReportDialog } from "../components/dialogs/SubmitScoreReportDialog";
 import { ProfileSettingsDialog } from "../components/dialogs/ProfileSettingsDialog";
 import { SupportDialog } from "../components/dialogs/SupportDialog";
+import { RenameTeamDialog } from "../components/dialogs/RenameTeamDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../state/AuthContext";
 import { useLeagueData } from "../state/LeagueDataContext";
 import { computeStandings } from "../state/standings";
 import { useThemeMode } from "../theme/ThemeContext";
 import { useSnackbar } from "../state/SnackbarContext";
 import { groupsApi } from "../api/groups";
+import { teamsApi } from "../api/teams";
 import { ApiError } from "../errors";
 import type { Fixture, Group, MatchResult, ScoreReport, Team } from "../api/types";
 
@@ -148,7 +151,7 @@ function GroupSection({
 }
 
 export function CompetitorHomeScreen() {
-  const { profile, signOut } = useAuth();
+  const { profile, refreshProfile, signOut } = useAuth();
   const {
     teams,
     groups,
@@ -168,6 +171,9 @@ export function CompetitorHomeScreen() {
   const [busyGroupId, setBusyGroupId] = useState<string | null>(null);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [showSupportDialog, setShowSupportDialog] = useState(false);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [isLeavingTeam, setIsLeavingTeam] = useState(false);
   const navigate = useNavigate();
 
   const myTeam = profile?.teamId ? teams.find((t) => t.id === profile.teamId) ?? null : null;
@@ -243,6 +249,23 @@ export function CompetitorHomeScreen() {
     }
   }
 
+  // On success profile.teamId becomes null, and App routes back to
+  // TeamAssignmentScreen to join or create another entry.
+  async function handleLeaveTeam() {
+    setShowLeaveConfirm(false);
+    setIsLeavingTeam(true);
+    try {
+      await teamsApi.leaveTeam();
+      await Promise.all([refetchTeams(), refreshProfile()]);
+      showSnackbar("You left the team.");
+    } catch (err) {
+      showSnackbar(err instanceof ApiError ? err.message : "Something went wrong.");
+      setIsLeavingTeam(false);
+    }
+  }
+
+  const canLeaveTeam = myTeam.entryType === "team" && myTeam.members.length > 1;
+
   return (
     <div>
       <header className="admin-header" style={{ borderBottom: "1px solid var(--card-border)" }}>
@@ -272,6 +295,16 @@ export function CompetitorHomeScreen() {
               {myTeam.name} is registered as {myTeam.entryType === "individual" ? "Individual player" : `${myTeam.members.length}-player team`}. You're
               in {myGroups.length} group{myGroups.length === 1 ? "" : "s"} right now.
             </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+              <button className="btn btn-tonal btn-sm" onClick={() => setShowRenameDialog(true)}>
+                {myTeam.entryType === "team" ? "Rename team" : "Rename entry"}
+              </button>
+              {canLeaveTeam && (
+                <button className="btn btn-outlined btn-sm" disabled={isLeavingTeam} onClick={() => setShowLeaveConfirm(true)}>
+                  {isLeavingTeam ? "Leaving..." : "Leave team"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -326,6 +359,26 @@ export function CompetitorHomeScreen() {
 
       {showProfileSettings && <ProfileSettingsDialog onClose={() => setShowProfileSettings(false)} />}
       {showSupportDialog && <SupportDialog onClose={() => setShowSupportDialog(false)} />}
+      {showRenameDialog && (
+        <RenameTeamDialog
+          team={myTeam}
+          onClose={() => setShowRenameDialog(false)}
+          onSaved={() => {
+            refetchTeams();
+            showSnackbar("Name updated.");
+          }}
+        />
+      )}
+      {showLeaveConfirm && (
+        <ConfirmDialog
+          title={`Leave ${myTeam.name}?`}
+          body="You'll be taken off the roster and can then join or create another entry. The team keeps its fixtures and results."
+          confirmLabel="Leave team"
+          danger
+          onCancel={() => setShowLeaveConfirm(false)}
+          onConfirm={handleLeaveTeam}
+        />
+      )}
 
       {reportFixture && (
         <SubmitScoreReportDialog

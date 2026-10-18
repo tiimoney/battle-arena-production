@@ -366,6 +366,69 @@ async function joinTeam(teamId: string): Promise<Team> {
   return teamGroupsApi.attachGroupIds([updated], links)[0];
 }
 
+// Competitor self-service: rename the entry you're on. Swaps the teamNames/
+// reservation in the same transaction, like the admin `update` above. See
+// firestore.rules' isValidTeamSelfRename -- only the name may change.
+async function renameOwnTeam(name: string): Promise<void> {
+  const profile = await requireProfile();
+  if (!profile.teamId) throw validationError("You are not registered for the tournament.");
+  const cleanedName = cleanName(name);
+  if (!cleanedName) throw validationError("Entry name is required.");
+
+  const teamRef = doc(db, "teams", profile.teamId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists()) throw notFound("Entry could not be found.");
+    const team = snap.data() as StoredTeam;
+
+    const normalizedOld = normalizeName(team.name);
+    const normalizedNew = normalizeName(cleanedName);
+    if (normalizedOld !== normalizedNew) {
+      const newNameRef = doc(db, "teamNames", normalizedNew);
+      const oldNameRef = doc(db, "teamNames", normalizedOld);
+      const [newNameSnap, oldNameSnap] = await Promise.all([tx.get(newNameRef), tx.get(oldNameRef)]);
+      if (newNameSnap.exists()) {
+        throw validationError("An entry with this name already exists.");
+      }
+      tx.set(newNameRef, { teamId: team.id });
+      // Only release the old reservation if it's really ours -- the rules' delete
+      // check reads resource.data.teamId, which fails on a missing doc.
+      if (oldNameSnap.exists() && (oldNameSnap.data() as { teamId: string }).teamId === team.id) {
+        tx.delete(oldNameRef);
+      }
+    }
+    tx.update(teamRef, { name: cleanedName });
+  });
+}
+
+// Competitor self-service: take yourself off your team's roster and clear your
+// profile's teamId, atomically -- a rule's get() during a transaction sees the
+// pre-transaction profile, so isValidTeamSelfLeave's "caller is on this team" check
+// still holds while the same transaction clears it. The last member can't leave
+// (that's disbanding, an admin action -- see firestore.rules).
+async function leaveTeam(): Promise<void> {
+  const profile = await requireProfile();
+  if (!profile.teamId) throw validationError("You are not registered for the tournament.");
+
+  const teamRef = doc(db, "teams", profile.teamId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (snap.exists()) {
+      const team = snap.data() as StoredTeam;
+      const remaining = team.members.filter((m) => m.linkedUserId !== profile.id);
+      // Already off the roster (e.g. the admin removed them) -- just clear the
+      // stale profile link below.
+      if (remaining.length !== team.members.length) {
+        if (remaining.length === 0) {
+          throw validationError("You're the last member of this team. Ask the admin to remove the entry instead.");
+        }
+        tx.update(teamRef, { members: remaining, teamSize: remaining.length });
+      }
+    }
+    tx.update(doc(db, "profiles", profile.id), { teamId: null });
+  });
+}
+
 export const teamsApi = {
   list,
   create,
@@ -374,4 +437,6 @@ export const teamsApi = {
   checkNameAvailable,
   registerNewEntry,
   joinTeam,
+  renameOwnTeam,
+  leaveTeam,
 };

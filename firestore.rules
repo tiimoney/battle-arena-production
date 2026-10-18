@@ -91,6 +91,38 @@ service cloud.firestore {
         isNonEmptyString(after.members[before.members.size()].name, 200);
     }
 
+    // Any linked member of an entry may rename it -- the name and nothing else. The
+    // matching teamNames/ swap is written in the same client-side transaction (see
+    // client/src/api/teams.ts's renameOwnTeam), same friendly-uniqueness tradeoff as
+    // every other reservation collection here. currentProfile() is the pre-write
+    // state, so this is "the caller is (still) on this team".
+    function isValidTeamSelfRename(teamId, before, after) {
+      return signedIn() &&
+        isActiveProfile() &&
+        currentProfile().teamId == teamId &&
+        after.diff(before).affectedKeys().hasOnly(['name']) &&
+        isNonEmptyString(after.name, 200);
+    }
+
+    // A member may remove themselves -- and only themselves -- from a team's roster.
+    // removeAll() yields exactly the dropped entries, so "one removed, and it's the
+    // caller" is checkable without iterating the list. The last member can't leave:
+    // an empty roster is really disbanding the entry, which cascades into fixtures
+    // and results and stays an admin action (teams/{id} delete below).
+    function isValidTeamSelfLeave(teamId, before, after) {
+      let removed = before.members.removeAll(after.members);
+      return signedIn() &&
+        isActiveProfile() &&
+        currentProfile().teamId == teamId &&
+        before.members.size() > 1 &&
+        after.diff(before).affectedKeys().hasOnly(['members', 'teamSize']) &&
+        after.members.size() == before.members.size() - 1 &&
+        after.teamSize == before.teamSize - 1 &&
+        before.members.hasAll(after.members) &&
+        removed.size() == 1 &&
+        removed[0].linkedUserId == request.auth.uid;
+    }
+
     // The new member always lands at the last array position -- both a brand-new
     // self-registered entry (isValidTeamSelfCreate, one member) and joining an
     // existing one (isValidTeamSelfJoin, appended at the end) guarantee this. Used
@@ -125,7 +157,10 @@ service cloud.firestore {
     match /teams/{teamId} {
       allow read: if signedIn();
       allow create: if isAdmin() || isValidTeamSelfCreate(request.resource.data);
-      allow update: if isAdmin() || isValidTeamSelfJoin(resource.data, request.resource.data);
+      allow update: if isAdmin() ||
+        isValidTeamSelfJoin(resource.data, request.resource.data) ||
+        isValidTeamSelfRename(teamId, resource.data, request.resource.data) ||
+        isValidTeamSelfLeave(teamId, resource.data, request.resource.data);
       allow delete: if isAdmin();
     }
 
@@ -160,13 +195,15 @@ service cloud.firestore {
     }
 
     // Public directory reserving a unique, normalized team name -> {teamId}. Anyone
-    // signed in may claim a fresh name when self-registering a new entry; only an
-    // admin renames/removes one (self-service never renames an existing entry, only
-    // creates new ones or joins existing ones as-is).
+    // signed in may claim a fresh name when self-registering or renaming an entry. A
+    // member may release their own team's old name when renaming it
+    // (isValidTeamSelfRename above); otherwise only an admin updates/removes one.
     match /teamNames/{name} {
       allow read: if true;
       allow create: if signedIn();
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin() ||
+        (signedIn() && isActiveProfile() && currentProfile().teamId == resource.data.teamId);
     }
 
     // Admin-configured tournament name + max players per entry.
@@ -249,6 +286,12 @@ service cloud.firestore {
       // transaction), or leave it unchanged. Without this, any competitor could
       // patch their own teamId straight to someone else's team id and immediately
       // gain that team's score-reporting rights with no roster membership at all.
+      //
+      // Clearing teamId back to null (leaving a team -- see client/src/api/teams.ts's
+      // leaveTeam, which writes it in the same transaction as isValidTeamSelfLeave's
+      // roster change) is allowed unconditionally: it only ever drops the caller's own
+      // rights, and rules can't search the roster to prove they're off it. The worst
+      // case is a stale roster slot the admin can see and remove.
       allow update: if signedIn() &&
         (
           isAdmin() ||
@@ -263,6 +306,7 @@ service cloud.firestore {
             isNonEmptyString(request.resource.data.displayName, 200) &&
             (
               request.resource.data.teamId == resource.data.teamId ||
+              request.resource.data.teamId == null ||
               (
                 resource.data.teamId == null &&
                 request.resource.data.teamId is string &&
