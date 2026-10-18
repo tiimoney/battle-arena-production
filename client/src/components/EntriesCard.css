@@ -1,0 +1,60 @@
+.entries-list {
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.entries-row + .entries-row {
+  border-top: 1px solid var(--divider-color);
+}
+
+.entries-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 0;
+}
+
+/* The whole name/meta area is the expand toggle -- a real button for keyboard and
+   screen-reader access, styled flat so it reads as a list row. */
+.entries-row-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entries-row-toggle:hover {
+  background: var(--color-surface-container);
+}
+
+.entries-row-caret {
+  color: var(--color-on-surface-variant);
+  font-size: 0.75rem;
+  width: 10px;
+}
+
+.entries-row-name {
+  font-weight: 700;
+}
+
+.entries-row-meta {
+  font-size: 0.82rem;
+  color: var(--color-on-surface-variant);
+}
+
+.entries-row-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px 32px;
+}

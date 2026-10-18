@@ -4,6 +4,7 @@ import { AdminShellScaffold } from "../components/AdminShellScaffold";
 import { PopupMenu } from "../components/PopupMenu";
 import { LeagueTableCard } from "../components/LeagueTableCard";
 import { EmptyStateCard } from "../components/EmptyStateCard";
+import { EntriesCard } from "../components/EntriesCard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddTeamDialog } from "../components/dialogs/AddTeamDialog";
 import { ExportLeagueDialog } from "../components/dialogs/ExportLeagueDialog";
@@ -19,7 +20,6 @@ import { teamsApi } from "../api/teams";
 import { scoreReportsApi } from "../api/scoreReports";
 import { leagueApi } from "../api/league";
 import { computeStandings } from "../state/standings";
-import { formatRelativeDate } from "../utils/relativeDate";
 import { ApiError } from "../errors";
 import type { ScoreReport, Team } from "../api/types";
 
@@ -312,75 +312,12 @@ export function DashboardScreen() {
           </div>
         </div>
 
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>Entries</h3>
-          <p style={{ marginTop: -8, color: "var(--color-on-surface-variant)" }}>
-            Review each entry type and the players attached to it.
-          </p>
-          {teams.length === 0 ? (
-            <EmptyStateCard title="No entries yet" message="Create your first entry to start building the league." />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {teams.map((team) => (
-                <div key={team.id} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div
-                        style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: "50%",
-                          background: "var(--color-primary-container)",
-                          color: "var(--color-on-primary-container)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontWeight: 700,
-                          fontSize: "0.8rem",
-                        }}
-                      >
-                        {team.members.length || team.teamSize}
-                      </div>
-                      <strong>{team.name}</strong>
-                    </div>
-                    <PopupMenu
-                      trigger={<button className="btn btn-text btn-sm">⋯</button>}
-                      items={[
-                        { label: "Edit entry", onSelect: () => setDialog({ type: "editTeam", team }) },
-                        { label: "Delete entry", onSelect: () => setDialog({ type: "deleteTeam", team }), destructive: true },
-                      ]}
-                    />
-                  </div>
-                  <div style={{ display: "flex", gap: 6, margin: "8px 0", flexWrap: "wrap" }}>
-                    <span className="chip">{team.entryType === "individual" ? "Individual" : "Team"}</span>
-                    <span className="chip">{team.members.length} player(s)</span>
-                    {team.registeredAt && (
-                      <span className="chip" title={new Date(team.registeredAt).toLocaleString()}>
-                        Registered {formatRelativeDate(team.registeredAt)}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {team.members.map((m) => (
-                      <span key={m.id} className="chip" title={m.joinedAt ? `Joined ${new Date(m.joinedAt).toLocaleString()}` : undefined}>
-                        {m.linkedUserId ? `✓ ${m.name} (system user)` : `${m.name}`}
-                      </span>
-                    ))}
-                  </div>
-                  {team.groupIds.length > 0 && (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                      {team.groupIds.map((gid) => (
-                        <span key={gid} className="chip chip-accent">
-                          {groupName(gid)}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <EntriesCard
+          teams={teams}
+          groupName={groupName}
+          onEdit={(team) => setDialog({ type: "editTeam", team })}
+          onDelete={(team) => setDialog({ type: "deleteTeam", team })}
+        />
       </div>
 
       {dialog?.type === "addTeam" && <AddTeamDialog onClose={() => setDialog(null)} onSaved={() => { refetchTeams(); showSnackbar("Entry added successfully."); }} />}
